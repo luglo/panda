@@ -346,7 +346,7 @@
 /* these access are slower, they must be as rare as possible */
 #define CPU_MMU_INDEX (cpu_mmu_index(env, false))
 #define MEMSUFFIX _data
-// #define PANDA_DO_CBS_DATA_ACCESS
+#define PANDA_DO_CBS_DATA_ACCESS
 #define DATA_SIZE 1
 #include "exec/cpu_ldst_template.h"
 
