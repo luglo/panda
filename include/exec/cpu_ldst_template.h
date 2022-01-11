@@ -118,7 +118,7 @@ glue(glue(glue(cpu_ld, USUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
                                                             oi, retaddr);
     } else {
         uintptr_t hostaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
-        #if !defined(SOFTMMU_CODE_ACCESS)
+        #if !defined(PANDA_DO_CBS_DATA_ACCESS)
         if (likely(!panda_use_memcb)){
             res = glue(glue(ld, USUFFIX), _p)((uint8_t *)hostaddr);
         }else{
@@ -167,7 +167,7 @@ glue(glue(glue(cpu_lds, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
                                MMUSUFFIX)(env, addr, oi, retaddr);
     } else {
         uintptr_t hostaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
-        #if !defined(SOFTMMU_CODE_ACCESS)
+        #if !defined(PANDA_DO_CBS_DATA_ACCESS)
         if (likely(!panda_use_memcb)){
             res = glue(glue(lds, SUFFIX), _p)((uint8_t *)hostaddr);
         }else{
@@ -220,7 +220,7 @@ glue(glue(glue(cpu_st, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
                                                      retaddr);
     } else {
         uintptr_t hostaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
-        #if !defined(SOFTMMU_CODE_ACCESS)
+        #if !defined(PANDA_DO_CBS_DATA_ACCESS)
         if (likely(!panda_use_memcb)){
             glue(glue(st, SUFFIX), _p)((uint8_t *)hostaddr, v);
         }else{
