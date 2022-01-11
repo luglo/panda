@@ -168,9 +168,6 @@ glue(glue(glue(cpu_lds, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
     } else {
         uintptr_t hostaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
         #if defined(PANDA_DO_CBS_DATA_ACCESS)
-        #define STR(x) #x
-        #define XSTR(x) STR(x)
-        #pragma message XSTR(glue(glue(glue(cpu_ld, USUFFIX), MEMSUFFIX), _ra))
         if (likely(!panda_use_memcb)){
             res = glue(glue(lds, SUFFIX), _p)((uint8_t *)hostaddr);
         }else{
@@ -224,9 +221,6 @@ glue(glue(glue(cpu_st, SUFFIX), MEMSUFFIX), _ra)(CPUArchState *env,
     } else {
         uintptr_t hostaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
         #if defined(PANDA_DO_CBS_DATA_ACCESS)
-        #define STR(x) #x
-        #define XSTR(x) STR(x)
-        #pragma message XSTR(glue(glue(glue(cpu_ld, USUFFIX), MEMSUFFIX), _ra))
         if (likely(!panda_use_memcb)){
             glue(glue(st, SUFFIX), _p)((uint8_t *)hostaddr, v);
         }else{
