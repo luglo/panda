@@ -451,11 +451,11 @@ WORD_TYPE helper_le_ld_name(CPUArchState *env, target_ulong addr,
     return ret;
 }
 
-// WORD_TYPE glue(helper_le_ld_name, _panda)(CPUArchState *env, target_ulong addr,
-//                                           TCGMemOpIdx oi, uintptr_t retaddr)
-// {
-//     return helper_le_ld_name(env, addr, oi, retaddr);
-// }
+WORD_TYPE glue(helper_le_ld_name, _panda)(CPUArchState *env, target_ulong addr,
+                                          TCGMemOpIdx oi, uintptr_t retaddr)
+{
+    return helper_le_ld_name(env, addr, oi, retaddr);
+}
 
 void helper_le_st_name(CPUArchState *env, target_ulong addr,
                                      DATA_TYPE val, TCGMemOpIdx oi,
@@ -489,11 +489,11 @@ void helper_le_st_name(CPUArchState *env, target_ulong addr,
     panda_callbacks_mem_after_write(cpu, cpu->panda_guest_pc, addr, DATA_SIZE, (uint64_t)val, (void *)haddr);
 }
 
-// void glue(helper_le_st_name, _panda)(CPUArchState *env, target_ulong addr,
-//                                      DATA_TYPE val, TCGMemOpIdx oi,
-//                                      uintptr_t retaddr){
-//     return helper_le_st_name(env, addr, val, oi, retaddr);
-// }
+void glue(helper_le_st_name, _panda)(CPUArchState *env, target_ulong addr,
+                                     DATA_TYPE val, TCGMemOpIdx oi,
+                                     uintptr_t retaddr){
+    return helper_le_st_name(env, addr, val, oi, retaddr);
+}
 
 #if DATA_SIZE > 1
 WORD_TYPE helper_be_ld_name(CPUArchState *env, target_ulong addr,
@@ -527,11 +527,11 @@ WORD_TYPE helper_be_ld_name(CPUArchState *env, target_ulong addr,
     return ret;
 }
 
-// WORD_TYPE glue(helper_be_ld_name, _panda)(CPUArchState *env, target_ulong addr,
-//                                           TCGMemOpIdx oi, uintptr_t retaddr)
-// {
-//     return helper_be_ld_name(env, addr, oi, retaddr);
-// }
+WORD_TYPE glue(helper_be_ld_name, _panda)(CPUArchState *env, target_ulong addr,
+                                          TCGMemOpIdx oi, uintptr_t retaddr)
+{
+    return helper_be_ld_name(env, addr, oi, retaddr);
+}
 
 void helper_be_st_name(CPUArchState *env, target_ulong addr,
                                      DATA_TYPE val, TCGMemOpIdx oi,
@@ -564,11 +564,11 @@ void helper_be_st_name(CPUArchState *env, target_ulong addr,
     panda_callbacks_mem_after_write(cpu, cpu->panda_guest_pc, addr, DATA_SIZE, (uint64_t)val, (void *)haddr);
 }
 
-// void glue(helper_be_st_name, _panda)(CPUArchState *env, target_ulong addr,
-//                                      DATA_TYPE val, TCGMemOpIdx oi,
-//                                      uintptr_t retaddr){
-//     return helper_be_st_name(env, addr, val, oi, retaddr);
-// }
+void glue(helper_be_st_name, _panda)(CPUArchState *env, target_ulong addr,
+                                     DATA_TYPE val, TCGMemOpIdx oi,
+                                     uintptr_t retaddr){
+    return helper_be_st_name(env, addr, val, oi, retaddr);
+}
 
 #endif /* DATA_SIZE > 1 */
 #else
