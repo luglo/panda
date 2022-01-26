@@ -1,8 +1,8 @@
 [package]
 name = "hooks3"
 version = "0.1.0"
-authors = ["Luke Craig <Luke.Craig@ll.mit.edu>", "Jordan McLeod <Jordan.McLeod@ll.mit.edu>"]
-edition = "2018"
+authors = ["Luke Craig <Luke.Craig@ll.mit.edu>"]
+edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
@@ -10,10 +10,6 @@ crate-type = ["cdylib"]
 [dependencies]
 lazy_static = "1.4.0"
 panda-re = { git = "https://github.com/panda-re/panda-rs"}
-
-
-[profile.release]
-opt-level = 1
 
 [features]
 default = ["x86_64"]

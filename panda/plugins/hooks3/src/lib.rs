@@ -26,7 +26,6 @@ lazy_static! {
 
 #[no_mangle]
 pub extern "C" fn register_plugin() -> PluginReg {
-    println!("registering plugin");
     PLUGIN_REG_NUM.fetch_add(1, Ordering::SeqCst)
 }
 
@@ -47,16 +46,15 @@ pub extern "C" fn add_hook(
     always_starts_block: bool,
     fun: FnCb,
 ) {
-    println!("add_hook");
-
     let mut manager = HMANAGER.lock().unwrap();
+
     let h: Hook = Hook {
         pc,
         asid: match asid {
             0 => None,
             p => Some(p),
         },
-        cb: fun,
+        cb: fun as u64,
         always_starts_block,
         plugin_num: num,
     };
@@ -65,7 +63,6 @@ pub extern "C" fn add_hook(
     if manager.has_hooks() {
         BEFORE_TCG_CODEGEN_CB.lock().unwrap().enable();
     }
-    drop(manager);
     // if we're in the vCPU thread exit without exception
     unsafe {
         let cpu = &mut *get_cpu();
@@ -81,7 +78,6 @@ pub extern "C" fn add_hook(
 
 /// this function is what is inserted by before_tcg_codegen
 extern "C" fn middle_filter(cpu: &mut CPUState, tb: &mut TranslationBlock) {
-    println!("middle filter");
     let mut manager = HMANAGER.lock().unwrap();
     manager.run_tb(cpu, tb);
 }
@@ -95,11 +91,9 @@ pub fn tcg_codegen(cpu: &mut CPUState, tb: &mut TranslationBlock) {
 
 #[panda::init]
 pub fn init(_: &mut PluginHandle) -> bool {
-    println!("asdf");
     let cb = BEFORE_TCG_CODEGEN_CB.lock().unwrap();
     cb.before_tcg_codegen(tcg_codegen);
     cb.disable();
-
     true
 }
 

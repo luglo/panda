@@ -53,7 +53,7 @@ pub struct Hook {
     pub pc: target_ulong,
     pub asid: Option<target_ulong>,
     pub plugin_num: PluginReg,
-    pub cb: FnCb,
+    pub cb: u64,
     pub always_starts_block: bool,
 }
 
@@ -170,14 +170,14 @@ impl HookManager {
         let low: Hook = Hook {
             pc: pc_start,
             asid: None,
-            cb: unsafe { std::mem::transmute::<usize, FnCb>(usize::MIN) },
+            cb: u64::MIN,
             plugin_num: 0,
             always_starts_block: false,
         };
         let high: Hook = Hook {
             pc: pc_end,
             asid: Some(target_ulong::MAX),
-            cb: unsafe { std::mem::transmute::<usize, FnCb>(usize::MAX) },
+            cb: u64::MAX,
             plugin_num: PluginReg::MAX,
             always_starts_block: true,
         };
@@ -185,7 +185,8 @@ impl HookManager {
         for &elem in self.hooks.range((Included(&low), Included(&high))) {
             if elem.asid == asid || elem.asid == None {
                 // if callback returns true remove from hooks
-                if (elem.cb)(cpu, tb, &elem) {
+                let cb = unsafe { std::mem::transmute::<u64, FnCb>(elem.cb) };
+                if (cb)(cpu, tb, &elem) {
                     self.matched_hooks.insert(elem);
                 }
             }
@@ -194,7 +195,6 @@ impl HookManager {
     }
 
     pub fn insert_on_matches(self: &mut Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
-        println!("about to insert_on_matches");
         let pc_start = tb.pc;
         let pc_end = tb.pc + tb.size as u64;
 
@@ -202,21 +202,20 @@ impl HookManager {
         let low: Hook = Hook {
             pc: pc_start,
             asid: None,
-            cb: unsafe { std::mem::transmute::<usize, FnCb>(usize::MIN) },
+            cb: u64::MIN,
             plugin_num: 0,
             always_starts_block: false,
         };
         let high: Hook = Hook {
             pc: pc_end,
             asid: Some(target_ulong::MAX),
-            cb: unsafe { std::mem::transmute::<usize, FnCb>(usize::MAX) },
+            cb: u64::MAX,
             plugin_num: PluginReg::MAX,
             always_starts_block: true,
         };
 
         // iterate over B-tree matches. Add matches to set to avoid duplicates
         for &elem in self.hooks.range((Included(&low), Included(&high))) {
-            println!("range matches");
             // add matches to set. avoid duplicates
             if self.matched_pcs.contains(&elem.pc) {
                 continue;
@@ -234,7 +233,6 @@ impl HookManager {
             // check op and insert both middle filter and check_cpu_exit
             // so we can cpu_exit if need be.
             if !op.is_null() {
-                println!("inserting call");
                 unsafe {
                     insert_call_2p(&mut op, middle_filter, cpu, tb);
                     insert_call_1p(&mut op, check_cpu_exit, u64::MAX as *mut c_void);
