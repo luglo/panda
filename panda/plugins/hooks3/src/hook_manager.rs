@@ -1,3 +1,19 @@
+/// PANDABEGINCOMMENT
+///
+///  Authors:
+///  Luke Craig                  luke.craig@ll.mit.edu
+///
+/// This work is licensed under the terms of the GNU GPL, version 2.
+/// See the COPYING file in the top-level directory.
+///
+/// PANDAENDCOMMENT
+///
+/// DESCRIPTION:
+///
+/// This file does most of the state management for the hooks plugin.
+///
+/// The vast majority of the logic is implemented in the hook manager.
+///
 use crate::api::PluginReg;
 use crate::{middle_filter, tcg_codegen};
 use std::cmp::{Ord, Ordering};
@@ -28,6 +44,8 @@ extern "C" {
         tb: &mut TranslationBlock,
     );
     fn check_cpu_exit(none: *mut c_void);
+    fn tb_lock();
+    fn tb_unlock();
 }
 const TB_JMP_CACHE_BITS: u32 = 12;
 const TB_JMP_PAGE_BITS: u32 = TB_JMP_CACHE_BITS / 2;
@@ -247,7 +265,33 @@ impl HookManager {
         self.matched_pcs.clear();
     }
 
-    pub fn clear_tbs(self: &mut Self, cpu: &mut CPUState) {
+    pub fn tb_needs_retranslated(self: &mut Self, tb: &mut TranslationBlock) -> bool {
+        let pc_start = tb.pc;
+        let pc_end = tb.pc + tb.size as u64;
+
+        // make hooks to compare to. highest and lowest candidates
+        let low: Hook = Hook {
+            pc: pc_start,
+            asid: None,
+            cb: u64::MIN,
+            plugin_num: 0,
+            always_starts_block: false,
+        };
+        let high: Hook = Hook {
+            pc: pc_end,
+            asid: Some(target_ulong::MAX),
+            cb: u64::MAX,
+            plugin_num: PluginReg::MAX,
+            always_starts_block: true,
+        };
+
+        // iterate over B-tree matches. Add matches to set to avoid duplicates
+        // self.hooks.range((Included(&low), Included(&high))).any(f)
+        false
+    }
+
+    pub fn clear_tbs(self: &mut Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
+        let mut matches_existing_block = false;
         // start_tbs guarantee that pc is the start of the block
         if !self.clear_start_tb.is_empty() {
             for &pc in self.clear_start_tb.iter() {
@@ -271,6 +315,8 @@ impl HookManager {
                             if (*elem).pc <= pc && pc <= (*elem).pc + (*elem).size as u64 {
                                 // u64::MAX -> -1
                                 tb_phys_invalidate(elem, u64::MAX);
+                                // break because other matches are irrelevant
+                                // for this tb
                                 break;
                             }
                         }

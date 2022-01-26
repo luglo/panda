@@ -1,19 +1,35 @@
+/// PANDABEGINCOMMENT
+///
+///  Authors:
+///  Luke Craig                  luke.craig@ll.mit.edu
+///
+/// This work is licensed under the terms of the GNU GPL, version 2.
+/// See the COPYING file in the top-level directory.
+///
+/// PANDAENDCOMMENT
+///
+/// DESCRIPTION:
+///
+/// This file contains a C-compatible API for hooks3.
+///
 use crate::hook_manager::{FnCb, Hook, HookManager};
 use panda::prelude::*;
 use panda::sys::get_cpu;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-pub(crate) type PluginReg = u32;
-static PLUGIN_REG_NUM: AtomicU32 = AtomicU32::new(0);
-lazy_static! {
-    pub(crate) static ref HMANAGER: Mutex<HookManager> = Mutex::new(HookManager::new());
-}
-
 extern "C" {
     fn qemu_in_vcpu_thread() -> bool;
     fn panda_do_exit_cpu();
 }
+
+lazy_static! {
+    pub(crate) static ref HMANAGER: Mutex<HookManager> =
+        Mutex::new(HookManager::new());
+}
+
+pub(crate) type PluginReg = u32;
+static PLUGIN_REG_NUM: AtomicU32 = AtomicU32::new(0);
 
 #[no_mangle]
 pub extern "C" fn register_plugin() -> PluginReg {
