@@ -1,4 +1,5 @@
-use crate::{middle_filter, PluginReg, BEFORE_TCG_CODEGEN_CB};
+use crate::api::PluginReg;
+use crate::{middle_filter, tcg_codegen};
 use std::cmp::{Ord, Ordering};
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::c_void;
@@ -137,6 +138,9 @@ impl HookManager {
         } else {
             self.clear_full_tb.push(h.pc);
         }
+        if !self.has_hooks() {
+            tcg_codegen::enable();
+        }
         self.hooks.insert(*h);
     }
 
@@ -149,7 +153,7 @@ impl HookManager {
         }
 
         if self.hooks.is_empty() {
-            BEFORE_TCG_CODEGEN_CB.lock().unwrap().disable();
+            tcg_codegen::disable();
         }
     }
 

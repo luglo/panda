@@ -6,6 +6,7 @@ edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
+path = "src/hooks3.rs"
 
 [dependencies]
 lazy_static = "1.4.0"
