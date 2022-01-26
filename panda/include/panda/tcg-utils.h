@@ -143,6 +143,12 @@ T try_parse(const std::string& value)
 extern "C"
 {
 #endif
+/**
+ * Shared function to manage cpu exits.
+ * 
+ * Insert after any call that could trigger a generated cpu exit during.
+ */
+void check_cpu_exit(void*);
 
 /**
  * Search the TCG context for the first guest instruction marker and return a
@@ -164,6 +170,7 @@ TCGOp *find_guest_insn_by_addr(target_ulong addr);
 TCGOp *find_last_guest_insn(void);
 
 void insert_call_1p(TCGOp **after_op, void(*func)(void*), void *val);
+void insert_call_2p(TCGOp **after_op, void(*func)(void*), void *val, void *val2);
 
 #ifdef __cplusplus
 }
