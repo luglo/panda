@@ -8,9 +8,13 @@ edition = "2021"
 crate-type = ["cdylib"]
 path = "src/hooks3.rs"
 
+[profile.release]
+panic = 'abort'
+debug = true
+
 [dependencies]
 lazy_static = "1.4.0"
-panda-re = { git = "https://github.com/panda-re/panda-rs"}
+panda-re = { git = "https://github.com/panda-re/panda-rs", branch="remove_stray_print"}
 
 [features]
 default = ["x86_64"]

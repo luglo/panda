@@ -16,10 +16,13 @@
 ///
 use crate::api::PluginReg;
 use crate::{middle_filter, tcg_codegen};
+use std::borrow::BorrowMut;
 use std::cmp::{Ord, Ordering};
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::c_void;
 use std::ops::Bound::Included;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Mutex, RwLock};
 
 use panda::current_asid;
 use panda::prelude::{target_ulong, CPUState, TranslationBlock};
@@ -31,21 +34,24 @@ pub(crate) type MCB = extern "C" fn(&mut CPUState, &mut TranslationBlock);
 pub(crate) type CCE = unsafe extern "C" fn(*mut c_void);
 // hooks callback type
 pub(crate) type FnCb = extern "C" fn(&mut CPUState, &mut TranslationBlock, &Hook) -> bool;
+// wrapper function
+pub(crate) type WFN =
+    unsafe extern "C" fn(fn(*mut c_void, *mut c_void), a1: *mut c_void, a2: *mut c_void);
 
 extern "C" {
     fn find_first_guest_insn() -> *mut TCGOp;
     fn find_guest_insn_by_addr(pc: target_ulong) -> *mut TCGOp;
     fn insert_call_1p(after_op: *mut *mut TCGOp, fun: CCE, cpu: *mut c_void);
+    fn call_2p_check_cpu_exit(f: fn(*mut c_void, *mut c_void), a1: *mut c_void, a2: *mut c_void);
     #[allow(improper_ctypes)]
-    fn insert_call_2p(
+    fn insert_call_3p(
         after_op: *mut *mut TCGOp,
+        wrapper_fn: WFN,
         fun: MCB,
         cpu: &mut CPUState,
         tb: &mut TranslationBlock,
     );
     fn check_cpu_exit(none: *mut c_void);
-    fn tb_lock();
-    fn tb_unlock();
 }
 const TB_JMP_CACHE_BITS: u32 = 12;
 const TB_JMP_PAGE_BITS: u32 = TB_JMP_CACHE_BITS / 2;
@@ -54,7 +60,7 @@ const TB_JMP_ADDR_MASK: u32 = TB_JMP_PAGE_SIZE - 1;
 const TB_JMP_CACHE_SIZE: u32 = 1 << TB_JMP_CACHE_BITS;
 const TB_JMP_PAGE_MASK: u32 = TB_JMP_CACHE_SIZE - TB_JMP_PAGE_SIZE;
 
-fn rust_tb_jmp_cache_hash_func(pc: target_ulong) -> u32 {
+pub fn rust_tb_jmp_cache_hash_func(pc: target_ulong) -> u32 {
     let tmp = pc ^ (pc >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS));
     (((tmp >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS)) & TB_JMP_PAGE_MASK as target_ulong)
         | (tmp & TB_JMP_ADDR_MASK as target_ulong)) as u32
@@ -127,64 +133,101 @@ impl Ord for Hook {
     }
 }
 
-pub struct HookManager {
-    hooks: BTreeSet<Hook>,
-    matched_hooks: BTreeSet<Hook>,
-    matched_pcs: HashSet<target_ulong>,
+#[derive(Clone)]
+pub struct HookManagerState {
     clear_full_tb: Vec<target_ulong>,
     clear_start_tb: Vec<target_ulong>,
+}
+
+pub struct HookManager {
+    add_hooks: Mutex<Vec<Hook>>,
+    hooks: RwLock<BTreeSet<Hook>>,
+    instrumented_pcs: RwLock<HashSet<target_ulong>>,
+    state: Mutex<HookManagerState>,
+    last_retranslated_tb: AtomicU64,
 }
 
 impl HookManager {
     pub fn new() -> Self {
         Self {
-            hooks: BTreeSet::new(),
-            matched_hooks: BTreeSet::new(),
-            matched_pcs: HashSet::new(),
-            clear_full_tb: Vec::new(),
-            clear_start_tb: Vec::new(),
+            add_hooks: Mutex::new(Vec::new()),
+            hooks: RwLock::new(BTreeSet::new()),
+            instrumented_pcs: RwLock::new(HashSet::new()),
+            state: Mutex::new(HookManagerState {
+                clear_full_tb: Vec::new(),
+                clear_start_tb: Vec::new(),
+            }),
+            last_retranslated_tb: AtomicU64::new(0),
         }
     }
 
-    pub fn has_hooks(self: &mut Self) -> bool {
-        return !self.hooks.is_empty();
+    pub fn has_hooks(self: &Self) -> bool {
+        let hooks = self.hooks.read().unwrap();
+        return !hooks.is_empty();
     }
 
-    pub fn add(self: &mut Self, h: &Hook) {
-        if h.always_starts_block {
-            self.clear_start_tb.push(h.pc);
-        } else {
-            self.clear_full_tb.push(h.pc);
-        }
+    pub fn add(self: &Self, h: &Hook) -> bool {
         if !self.has_hooks() {
             tcg_codegen::enable();
         }
-        self.hooks.insert(*h);
+        let hooks = self.hooks.read().unwrap();
+        if !hooks.contains(h) {
+            let mut add_hooks = self.add_hooks.lock().unwrap();
+            if !add_hooks.contains(h) {
+                add_hooks.push(*h);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 
-    fn clear_empty_hooks(self: &mut Self) {
-        if !self.matched_hooks.is_empty() {
-            for &elem in self.matched_hooks.iter() {
-                self.hooks.remove(&elem);
+    fn new_hooks_add(self: &Self) {
+        let mut add_hooks = self.add_hooks.lock().unwrap();
+        if !add_hooks.is_empty() {
+            let mut hooks = self.hooks.write().unwrap();
+            let mut state = self.state.lock().unwrap();
+            for &h in add_hooks.iter() {
+                hooks.insert(h);
+                if h.always_starts_block {
+                    state.clear_start_tb.push(h.pc);
+                } else {
+                    state.clear_full_tb.push(h.pc);
+                }
             }
-            self.matched_hooks.clear();
+            add_hooks.clear();
+        }
+    }
+
+    fn clear_empty_hooks(self: &Self, matched_hooks: Vec<Hook>) {
+        if !matched_hooks.is_empty() {
+            let mut hooks = self.hooks.write().unwrap();
+            for &elem in matched_hooks.iter() {
+                hooks.remove(&elem);
+            }
         }
 
-        if self.hooks.is_empty() {
+        if !self.has_hooks() {
             tcg_codegen::disable();
         }
     }
 
-    pub fn remove_plugin(self: &mut Self, num: PluginReg) {
-        for &elem in self.hooks.iter() {
+    pub fn remove_plugin(self: &Self, num: PluginReg) {
+        let hooks = self.hooks.read().unwrap();
+        let mut matched_hooks = Vec::new();
+        for &elem in hooks.iter() {
             if elem.plugin_num == num {
-                self.matched_hooks.insert(elem);
+                matched_hooks.push(elem);
             }
         }
-        self.clear_empty_hooks();
+        drop(hooks);
+        self.clear_empty_hooks(matched_hooks);
     }
 
-    pub fn run_tb(self: &mut Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
+    pub fn run_tb(self: &Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
+        self.new_hooks_add();
         let pc_start = tb.pc;
         let pc_end = tb.pc + tb.size as u64;
         let asid = Some(current_asid(cpu));
@@ -204,19 +247,25 @@ impl HookManager {
             always_starts_block: true,
         };
 
-        for &elem in self.hooks.range((Included(&low), Included(&high))) {
-            if elem.asid == asid || elem.asid == None {
-                // if callback returns true remove from hooks
-                let cb = unsafe { std::mem::transmute::<u64, FnCb>(elem.cb) };
-                if (cb)(cpu, tb, &elem) {
-                    self.matched_hooks.insert(elem);
+        let mut matched_hooks = Vec::new();
+        let hooks = self.hooks.read().unwrap();
+
+        for &elem in hooks.range((Included(&low), Included(&high))) {
+            if pc_start <= elem.pc && elem.pc < pc_end {
+                if elem.asid == asid || elem.asid == None {
+                    let cb = unsafe { std::mem::transmute::<u64, FnCb>(elem.cb) };
+                    // if callback returns true remove from hooks
+                    if (cb)(cpu, tb, &elem) {
+                        matched_hooks.push(elem);
+                    }
                 }
             }
         }
-        self.clear_empty_hooks();
+        drop(hooks);
+        self.clear_empty_hooks(matched_hooks);
     }
 
-    pub fn insert_on_matches(self: &mut Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
+    pub fn insert_on_matches(self: &Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
         let pc_start = tb.pc;
         let pc_end = tb.pc + tb.size as u64;
 
@@ -235,11 +284,17 @@ impl HookManager {
             plugin_num: PluginReg::MAX,
             always_starts_block: true,
         };
+        let hooks = self.hooks.read().unwrap();
+
+        // these are different hashsets.
+        // matched_pcs are the pcs matched this round
+        // instrumented_pcs are globally instrumented PCs.
+        let mut matched_pcs = HashSet::new();
 
         // iterate over B-tree matches. Add matches to set to avoid duplicates
-        for &elem in self.hooks.range((Included(&low), Included(&high))) {
+        for &elem in hooks.range((Included(&low), Included(&high))) {
             // add matches to set. avoid duplicates
-            if self.matched_pcs.contains(&elem.pc) {
+            if matched_pcs.contains(&elem.pc) {
                 continue;
             }
 
@@ -255,17 +310,21 @@ impl HookManager {
             // check op and insert both middle filter and check_cpu_exit
             // so we can cpu_exit if need be.
             if !op.is_null() {
+                println!("inserting call {:x}", elem.pc);
                 unsafe {
-                    insert_call_2p(&mut op, middle_filter, cpu, tb);
-                    insert_call_1p(&mut op, check_cpu_exit, u64::MAX as *mut c_void);
+                    insert_call_3p(&mut op, call_2p_check_cpu_exit, middle_filter, cpu, tb);
                 }
             }
-            self.matched_pcs.insert(elem.pc);
+            matched_pcs.insert(elem.pc);
         }
-        self.matched_pcs.clear();
+        let mut instrumented_pcs = self.instrumented_pcs.write().unwrap();
+        for pc in matched_pcs.iter() {
+            instrumented_pcs.insert(*pc);
+        }
     }
 
-    pub fn tb_needs_retranslated(self: &mut Self, tb: &mut TranslationBlock) -> bool {
+    pub fn tb_needs_retranslated(self: &Self, tb: &mut TranslationBlock) -> bool {
+        self.new_hooks_add();
         let pc_start = tb.pc;
         let pc_end = tb.pc + tb.size as u64;
 
@@ -285,45 +344,73 @@ impl HookManager {
             always_starts_block: true,
         };
 
+        let hooks = self.hooks.read().unwrap();
+        let instrumented_pcs = self.instrumented_pcs.read().unwrap();
+
         // iterate over B-tree matches. Add matches to set to avoid duplicates
-        // self.hooks.range((Included(&low), Included(&high))).any(f)
-        false
+        for &elem in hooks.range((Included(&low), Included(&high))) {
+            if pc_start <= elem.pc && elem.pc < pc_end {
+                if !instrumented_pcs.contains(&elem.pc) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    pub fn clear_tbs(self: &mut Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
-        let mut matches_existing_block = false;
+    pub fn pc_instrumented(self: &Self, pc: target_ulong) -> bool {
+        // println!("trying to lock instrumented_pcs");
+        let instrumented_pcs = self.instrumented_pcs.read().unwrap();
+        // println!("trying to lock instrumented pcs exit");
+        instrumented_pcs.contains(&pc)
+    }
+
+    pub fn clear_tbs(self: &Self, cpu: &mut CPUState, tb: Option<*mut TranslationBlock>) {
+        // println!("clear_tbs");
+        self.new_hooks_add();
+        // println!("new_hooks_add end");
         // start_tbs guarantee that pc is the start of the block
-        if !self.clear_start_tb.is_empty() {
-            for &pc in self.clear_start_tb.iter() {
-                let index = rust_tb_jmp_cache_hash_func(pc);
-                unsafe {
-                    let pot = cpu.tb_jmp_cache[index as usize];
-                    if !pot.is_null() && (*pot).pc == pc {
-                        // u64::MAX -> -1
-                        tb_phys_invalidate(pot, u64::MAX);
+        let mut state = self.state.lock().unwrap();
+        if !state.clear_start_tb.is_empty() {
+            let instrumented_pcs = self.instrumented_pcs.read().unwrap();
+            for &pc in state.clear_start_tb.iter() {
+                if !instrumented_pcs.contains(&pc) {
+                    let index = rust_tb_jmp_cache_hash_func(pc);
+                    unsafe {
+                        let pot = cpu.tb_jmp_cache[index as usize];
+                        if !pot.is_null() && Some(pot) != tb && (*pot).pc == pc {
+                            println!("invalidating {:x}", pc);
+                            // u64::MAX -> -1
+                            tb_phys_invalidate(pot, u64::MAX);
+                        }
                     }
                 }
             }
-            self.clear_start_tb.clear();
+            state.clear_start_tb.clear();
         }
         //full_tbs can be any part of the block
-        if !self.clear_full_tb.is_empty() {
+        if !state.clear_full_tb.is_empty() {
+            let instrumented_pcs = self.instrumented_pcs.read().unwrap();
             for &elem in cpu.tb_jmp_cache.iter() {
-                if !elem.is_null() {
-                    for &pc in self.clear_full_tb.iter() {
-                        unsafe {
-                            if (*elem).pc <= pc && pc <= (*elem).pc + (*elem).size as u64 {
-                                // u64::MAX -> -1
-                                tb_phys_invalidate(elem, u64::MAX);
-                                // break because other matches are irrelevant
-                                // for this tb
-                                break;
+                if !elem.is_null() && Some(elem) != tb {
+                    for &pc in state.clear_full_tb.iter() {
+                        if !instrumented_pcs.contains(&pc) {
+                            unsafe {
+                                if (*elem).pc <= pc && pc < (*elem).pc + (*elem).size as u64 {
+                                    println!("invalidating {:x}", pc);
+                                    // u64::MAX -> -1
+                                    tb_phys_invalidate(elem, u64::MAX);
+                                    // break because other matches are irrelevant
+                                    // for this tb
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             }
-            self.clear_full_tb.clear();
+            state.clear_full_tb.clear();
         }
+        // println!("clear_tbs end");
     }
 }
