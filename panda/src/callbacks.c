@@ -809,7 +809,7 @@ bool panda_exit_cpu(void)
 }
 
 void panda_do_exit_cpu(void){
-    panda_please_exit_cpu = false;
+    panda_please_exit_cpu = true;
 }
 
 void panda_enable_precise_pc(void)

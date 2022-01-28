@@ -18,9 +18,9 @@ PANDAENDCOMMENT */
 // correctly. This needs further investigation.
 // Uncomment next lines to enable debug prints for tracking of system
 // call context. Only for x86
-#define DEBUG
-#define SYSCALL_RETURN_DEBUG
-#define PANDA_LOG_LEVEL PANDA_LOG_DEBUG
+// #define DEBUG
+// #define SYSCALL_RETURN_DEBUG
+// #define PANDA_LOG_LEVEL PANDA_LOG_DEBUG
 
 #include "panda/plugin.h"
 #include "panda/plugin_plugin.h"
@@ -966,8 +966,7 @@ void before_tcg_codegen(CPUState *cpu, TranslationBlock *tb){
 #endif
     if(res != 0 && res != (target_ulong) -1){
         TCGOp *op = find_guest_insn_by_addr(res);
-        insert_call(&op, syscall_callback, cpu, tb, res, static_callno);
-        insert_call(&op, check_cpu_exit, NULL);
+        insert_call(&op, call_4p_check_cpu_exit, syscall_callback, cpu, tb, res, static_callno);
     }
 }
 
@@ -1127,7 +1126,7 @@ bool init_plugin(void *self) {
 
     PluginReg (*hooks_register_plugin)() = (PluginReg(*)())dlsym(hooks3,"register_plugin");
 
-    hooks_add_hook = (void(*)(PluginReg, target_ulong, target_ulong, bool, FnCb)) dlsym(hooks3, "add_hook");
+    hooks_add_hook = (void(*)(PluginReg, target_ulong, target_ulong, bool, FnCb)) dlsym(hooks3, "add_hook3");
 
     plugin_reg_num = hooks_register_plugin();
 #else //not x86/arm/mips

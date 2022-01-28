@@ -29,27 +29,27 @@ use panda::prelude::{target_ulong, CPUState, TranslationBlock};
 use panda::sys::{tb_phys_invalidate, TCGOp, TARGET_PAGE_BITS};
 
 // middle callback type
-pub(crate) type MCB = extern "C" fn(&mut CPUState, &mut TranslationBlock);
+pub(crate) type MCB = extern "C" fn(&mut CPUState, &mut TranslationBlock, pc: target_ulong);
 // check_cpu_exit callback type
-pub(crate) type CCE = unsafe extern "C" fn(*mut c_void);
+pub(crate) type CCE = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 // hooks callback type
 pub(crate) type FnCb = extern "C" fn(&mut CPUState, &mut TranslationBlock, &Hook) -> bool;
 // wrapper function
-pub(crate) type WFN =
-    unsafe extern "C" fn(fn(*mut c_void, *mut c_void), a1: *mut c_void, a2: *mut c_void);
+pub(crate) type WFN = unsafe extern "C" fn(CCE, a1: *mut c_void, a2: *mut c_void, a3: *mut c_void);
 
 extern "C" {
     fn find_first_guest_insn() -> *mut TCGOp;
     fn find_guest_insn_by_addr(pc: target_ulong) -> *mut TCGOp;
     fn insert_call_1p(after_op: *mut *mut TCGOp, fun: CCE, cpu: *mut c_void);
-    fn call_2p_check_cpu_exit(f: fn(*mut c_void, *mut c_void), a1: *mut c_void, a2: *mut c_void);
+    fn call_3p_check_cpu_exit(f: CCE, a1: *mut c_void, a2: *mut c_void, a3: *mut c_void);
     #[allow(improper_ctypes)]
-    fn insert_call_3p(
+    fn insert_call_4p(
         after_op: *mut *mut TCGOp,
         wrapper_fn: WFN,
         fun: MCB,
         cpu: &mut CPUState,
         tb: &mut TranslationBlock,
+        pc: target_ulong,
     );
     fn check_cpu_exit(none: *mut c_void);
 }
@@ -226,7 +226,12 @@ impl HookManager {
         self.clear_empty_hooks(matched_hooks);
     }
 
-    pub fn run_tb(self: &Self, cpu: &mut CPUState, tb: &mut TranslationBlock) {
+    pub fn run_tb(
+        self: &Self,
+        cpu: &mut CPUState,
+        tb: &mut TranslationBlock,
+        target_pc: target_ulong,
+    ) {
         self.new_hooks_add();
         let pc_start = tb.pc;
         let pc_end = tb.pc + tb.size as u64;
@@ -251,7 +256,7 @@ impl HookManager {
         let hooks = self.hooks.read().unwrap();
 
         for &elem in hooks.range((Included(&low), Included(&high))) {
-            if pc_start <= elem.pc && elem.pc < pc_end {
+            if target_pc == elem.pc {
                 if elem.asid == asid || elem.asid == None {
                     let cb = unsafe { std::mem::transmute::<u64, FnCb>(elem.cb) };
                     // if callback returns true remove from hooks
@@ -310,10 +315,19 @@ impl HookManager {
             // check op and insert both middle filter and check_cpu_exit
             // so we can cpu_exit if need be.
             if !op.is_null() {
-                println!("inserting call {:x}", elem.pc);
+                // println!("inserting call {:x}", elem.pc);
                 unsafe {
-                    insert_call_3p(&mut op, call_2p_check_cpu_exit, middle_filter, cpu, tb);
+                    insert_call_4p(
+                        &mut op,
+                        call_3p_check_cpu_exit,
+                        middle_filter,
+                        cpu,
+                        tb,
+                        elem.pc,
+                    );
                 }
+            } else {
+                // println!("failed inserting call {:x}", elem.pc);
             }
             matched_pcs.insert(elem.pc);
         }

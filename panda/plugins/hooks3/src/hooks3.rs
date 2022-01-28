@@ -29,9 +29,9 @@ mod hook_manager;
 mod api;
 use api::HMANAGER;
 
-extern "C" fn middle_filter(cpu: &mut CPUState, tb: &mut TranslationBlock) {
-    // println!("calling middle filter");
-    HMANAGER.run_tb(cpu, tb);
+extern "C" fn middle_filter(cpu: &mut CPUState, tb: &mut TranslationBlock, pc: target_ulong) {
+    // println!("calling middle filter {pc:x}");
+    HMANAGER.run_tb(cpu, tb, pc);
 }
 
 #[panda::before_tcg_codegen]

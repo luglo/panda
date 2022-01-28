@@ -61,13 +61,13 @@ pub fn eval_jmp_list_val(cpu: &mut CPUState, pc: target_ulong, val: usize) -> bo
 }
 
 pub fn pc_in_tb(cpu: &mut CPUState, pc: target_ulong, tb: *mut TranslationBlock) -> bool {
-    println!("tb {:x}", tb as usize);
+    // println!("tb {:x}", tb as usize);
     unsafe {
         if tb.is_null() {
             false
         } else {
             if (*tb).pc <= pc && pc < (*tb).pc + (*tb).size as u64 {
-                println!("returning true for pc_in_tb");
+                // println!("returning true for pc_in_tb");
                 true
             } else {
                 eval_jmp_list_val(cpu, pc, (*tb).jmp_list_next[0])
@@ -88,13 +88,6 @@ pub extern "C" fn add_hook3(
     // TODO: Consider returning hash value of hook to plugin to
     // uniquely identify it so it can be removed with the same
     // value. Alternatively, use a UID
-
-    // println!("add_hooks3 {:x}", pc);
-    if pc == 0x7ffff75f4f29 {
-        unsafe {
-            asm!("int3");
-        }
-    }
 
     if HMANAGER.add(&Hook {
         pc,
@@ -118,14 +111,14 @@ pub extern "C" fn add_hook3(
                     let index = rust_tb_jmp_cache_hash_func(current_pc);
                     let tb = cpu.tb_jmp_cache[index as usize];
                     if tb.is_null() {
-                        println!("have_tb_lock {:?}", have_tb_lock);
-                        asm!("int3");
+                        // println!("have_tb_lock {:?}", have_tb_lock);
+                        // asm!("int3");
                     }
                     if pc_in_tb(cpu, pc, tb) {
-                        println!("doing fancy stuff");
+                        // println!("doing fancy stuff");
                         tb_phys_invalidate(tb, u64::MAX);
                         panda_do_exit_cpu();
-                        asm!("int3");
+                        // asm!("int3");
                     }
                     qemu_mutex_unlock(&tcg_ctx.tb_ctx.tb_lock);
                 } else {
