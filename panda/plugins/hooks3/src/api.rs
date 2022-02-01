@@ -13,20 +13,17 @@
 /// This file contains a C-compatible API for hooks3.
 ///
 use crate::bbeio;
+// use crate::dyn_sym_hooks::symbol_hook;
 use crate::hook_manager::{rust_tb_jmp_cache_hash_func, FnCb, Hook, HookManager};
-use panda::sys::{get_cpu, tb_phys_invalidate, QemuMutex, TCGContext, TransactionAction};
+use panda::sys::{get_cpu, tb_phys_invalidate};
 use panda::{current_pc, prelude::*};
-use std::arch::asm;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 extern "C" {
     fn qemu_in_vcpu_thread() -> bool;
     fn panda_do_exit_cpu();
-    fn cpu_io_recompile(cpu: *mut CPUState, retaddr: *mut usize) -> !;
-    static have_tb_lock: i32;
-    fn qemu_mutex_trylock(mutex: &QemuMutex) -> i32;
-    fn qemu_mutex_unlock(mutex: &QemuMutex) -> i32;
-    static tcg_ctx: TCGContext;
+    fn tb_trylock() -> i32;
+    fn tb_lock_reset();
 }
 
 lazy_static! {
@@ -66,8 +63,8 @@ pub fn pc_in_tb(cpu: &mut CPUState, pc: target_ulong, tb: *mut TranslationBlock)
         if tb.is_null() {
             false
         } else {
-            if (*tb).pc <= pc && pc < (*tb).pc + (*tb).size as u64 {
-                // println!("returning true for pc_in_tb");
+            if (*tb).pc <= pc && pc < (*tb).pc + (*tb).size as target_ulong {
+                println!("returning true for pc_in_tb");
                 true
             } else {
                 eval_jmp_list_val(cpu, pc, (*tb).jmp_list_next[0])
@@ -95,32 +92,30 @@ pub extern "C" fn add_hook3(
             0 => None,
             p => Some(p),
         },
-        cb: fun as u64,
+        cb: Some(fun),
         always_starts_block,
         plugin_num: num,
-    }) && !HMANAGER.pc_instrumented(pc)
-    {
+    }) {
         unsafe {
             let cpu = &mut *get_cpu();
             let vcpu_thread = qemu_in_vcpu_thread();
             if vcpu_thread && cpu.running {
                 // if we can't get it we're in a TCG thread so we should
-                // get it at btc. If past it bbeio should get it.
-                if qemu_mutex_trylock(&tcg_ctx.tb_ctx.tb_lock) == 0 {
-                    let current_pc = current_pc(cpu);
-                    let index = rust_tb_jmp_cache_hash_func(current_pc);
-                    let tb = cpu.tb_jmp_cache[index as usize];
-                    if tb.is_null() {
-                        // println!("have_tb_lock {:?}", have_tb_lock);
-                        // asm!("int3");
-                    }
-                    if pc_in_tb(cpu, pc, tb) {
-                        // println!("doing fancy stuff");
-                        tb_phys_invalidate(tb, u64::MAX);
-                        panda_do_exit_cpu();
-                        // asm!("int3");
-                    }
-                    qemu_mutex_unlock(&tcg_ctx.tb_ctx.tb_lock);
+                // already have it.
+                let res = tb_trylock();
+                let current_pc = current_pc(cpu);
+                let index = rust_tb_jmp_cache_hash_func(current_pc);
+                let tb = cpu.tb_jmp_cache[index as usize];
+                if pc_in_tb(cpu, pc, tb) {
+                    tb_phys_invalidate(tb, u64::MAX);
+                    panda_do_exit_cpu();
+                }
+                // if we got a TB lock explicitly go ahead and clear some
+                // TBs. Otherwise enable bbeio to do it for us on the next
+                // run.
+                if res == 0 {
+                    HMANAGER.clear_tbs(cpu, Some(tb));
+                    tb_lock_reset();
                 } else {
                     bbeio::enable();
                 }
@@ -129,6 +124,11 @@ pub extern "C" fn add_hook3(
     }
 }
 
+// plugin_import! {
+//     static DYNAMIC_SYMBOLS: DynamicSymbols = extern "dynamic_symbols"{
+//         void (*hook_symbol_resolution_dlsym)(struct hook_symbol_resolve*);
+//     }
+// }
+
 // #[no_mangle]
-// see note above
-// pub extern "C" fn remove_hook(num: HookReg) {}
+// pub extern "C" fn add_symbol_hook3(sh: &symbol_hook) {}

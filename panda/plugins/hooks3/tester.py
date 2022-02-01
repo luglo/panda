@@ -6,7 +6,7 @@ import capstone
 from time import sleep
 
 # Single arg of arch, defaults to i386
-arch = "x86_64" if len(argv) <= 1 else argv[1]
+arch = "i386" if len(argv) <= 1 else argv[1]
 panda = Panda(generic=arch)
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
@@ -15,6 +15,9 @@ md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 def run_cmd():
     panda.revert_sync("root")
     print(panda.run_serial_cmd("uname -a",no_timeout=True))
+    print(panda.run_serial_cmd("whoami",no_timeout=True))
+    print(panda.run_serial_cmd("cat /etc/passwd",no_timeout=True))
+    print(panda.run_serial_cmd("lsmod",no_timeout=True))
     panda.end_analysis()
 
 def disas(cpu, tb, pc):
@@ -31,7 +34,8 @@ def do_hook(pc):
     def av2(cpu, tb, h):
         print(f"Got Hook @{h.pc:#x}")
         disas(cpu,tb,h.pc)
-        sleep(1)
+        return True
+        # sleep(1)
 
 @panda.ppp("proc_start_linux", "on_rec_auxv")
 def recv_auxv(cpu, tb, auxv):
@@ -49,7 +53,8 @@ def recv_auxv(cpu, tb, auxv):
         
         print("[bold yellow] ABOUT TO INSERT OUR HOOKS AND RUN [bold yellow]")
         print("[bold yellow] WATCH THE DISASSEMBLY GET SMALLER EACH ROUND [bold yellow]")
-        sleep(3)
+        # return True
+        # sleep(3)
 
 panda.enable_precise_pc()
 print("[bold red]This output is artificially slowed for readability[bold red]")

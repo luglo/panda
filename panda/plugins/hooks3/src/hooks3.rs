@@ -30,13 +30,12 @@ mod api;
 use api::HMANAGER;
 
 extern "C" fn middle_filter(cpu: &mut CPUState, tb: &mut TranslationBlock, pc: target_ulong) {
-    // println!("calling middle filter {pc:x}");
     HMANAGER.run_tb(cpu, tb, pc);
 }
 
 #[panda::before_tcg_codegen]
 pub fn tcg_codegen(cpu: &mut CPUState, tb: &mut TranslationBlock) {
-    // println!("tcg_codegen");
+    HMANAGER.new_hooks_add();
     HMANAGER.clear_tbs(cpu, Some(tb));
     HMANAGER.insert_on_matches(cpu, tb);
     // println!("tcg_codegen end");
@@ -47,52 +46,29 @@ extern "C" {
     fn tb_unlock();
 }
 
-#[panda::before_cpu_exec_exit]
-pub fn bcee(cpu: &mut CPUState, ran_blocks_since_enter: bool) {
-    bcee::disable();
+#[panda::before_block_exec_invalidate_opt]
+pub fn bbeio(cpu: &mut CPUState, tb: &mut TranslationBlock) -> bool {
+    bbeio::disable();
     // bbeio does not hold tb_lock unlike tcg_codegen
     unsafe {
         tb_lock();
     }
-    HMANAGER.clear_tbs(cpu, None);
+    HMANAGER.new_hooks_add();
+    HMANAGER.clear_tbs(cpu, Some(tb));
     unsafe {
         tb_unlock();
     }
-}
-
-#[panda::before_block_exec_invalidate_opt]
-pub fn bbeio(cpu: &mut CPUState, tb: &mut TranslationBlock) -> bool {
-    bbeio::disable();
-    if HMANAGER.tb_needs_retranslated(tb) {
-        // if we need retranslation we exit early.
-        // because we will retranslate tcg_codegen is guaranteed
-        // to happen again before execution
-        // This also removes the possibility that we modify the
-        // next block
-        // true
-        true
-    } else {
-        // bbeio does not hold tb_lock unlike tcg_codegen
-        unsafe {
-            tb_lock();
-        }
-        HMANAGER.clear_tbs(cpu, Some(tb));
-        unsafe {
-            tb_unlock();
-        }
-        false
-    }
+    false
 }
 
 #[panda::init]
 pub fn init(_: &mut PluginHandle) -> bool {
-    std::panic::set_hook(Box::new(|a| unsafe {
+    std::panic::set_hook(Box::new(|_a| unsafe {
         println!("{:?}", Backtrace::capture());
         asm!("int3");
     }));
     tcg_codegen::disable();
     bbeio::disable();
-    bcee::disable();
     true
 }
 
