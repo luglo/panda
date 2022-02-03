@@ -557,7 +557,24 @@ static void board_init(MachineState * ms)
         conf = qdict_new();
     }
 
-    cpuu = create_cpu(ms, conf);
+    //hacky way of enabling nvic with configurable machine
+    if (qdict_haskey(conf, "has_nvic") && qdict_get_bool(conf, "has_nvic")) {
+        DeviceState *armv7m;
+        const char* cpu_model = "cortex-m4";
+        if (qdict_haskey(conf, "cpu_model")) {
+            cpu_model = qdict_get_str(conf, "cpu_model");
+            g_assert(cpu_model);
+        }
+        armv7m = qdev_create(NULL, "armv7m");
+        qdev_prop_set_uint32(armv7m, "num-irq", 128);
+        qdev_prop_set_string(armv7m, "cpu-model", cpu_model);
+        object_property_set_link(OBJECT(armv7m), OBJECT(get_system_memory()),
+                                 "memory", &error_abort);
+        qdev_init_nofail(armv7m);
+        cpuu = ARM_CPU(first_cpu);
+    } else {
+        cpuu = create_cpu(ms, conf);
+    }
     set_entry_point(conf, cpuu);
 
     if (qdict_haskey(conf, "memory_mapping"))
