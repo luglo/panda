@@ -1,6 +1,7 @@
 #![feature(backtrace)]
 use std::arch::asm;
 use std::backtrace::Backtrace;
+use std::env::Args;
 
 /// PANDABEGINCOMMENT
 ///
@@ -63,10 +64,6 @@ pub fn bbeio(cpu: &mut CPUState, tb: &mut TranslationBlock) -> bool {
 
 #[panda::init]
 pub fn init(_: &mut PluginHandle) -> bool {
-    std::panic::set_hook(Box::new(|_a| unsafe {
-        println!("{:?}", Backtrace::capture());
-        asm!("int3");
-    }));
     tcg_codegen::disable();
     bbeio::disable();
     true
